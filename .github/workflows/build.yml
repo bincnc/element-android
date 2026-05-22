@@ -12,11 +12,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag }}
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -25,7 +27,20 @@ jobs:
           java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          # Download Android command line tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdtools.zip
+          unzip -q cmdtools.zip -d $HOME/android-sdk/cmdline-tools
+          mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
+          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          # Accept licenses
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          # Install required SDK components
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1
+          echo "[OK] Android SDK installed"
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -36,98 +51,59 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
 
-      - name: Apply customizations
+      - name: Apply RocketChat customizations
         run: |
           echo "=== Applying RocketChat customizations ==="
-          
-          # 1. Set default homeserver URL to chat.picn.eu.org
-          # Element Android stores this in vector-app module's strings.xml
-          find . -path "*/strings.xml" -exec grep -l "default_homeserver_url" {} \; | while read f; do
-            sed -i 's|<string name="default_homeserver_url">.*</string>|<string name="default_homeserver_url">https://chat.picn.eu.org</string>|g' "$f"
-            echo "[OK] Fixed homeserver in $f"
+
+          # 1. Set default homeserver URL
+          find . -name "strings.xml" | while read f; do
+            if grep -q "default_homeserver_url" "$f"; then
+              sed -i 's|<string name="default_homeserver_url">.*</string>|<string name="default_homeserver_url">https://chat.picn.eu.org</string>|' "$f"
+              echo "[OK] Set homeserver in $f"
+            fi
           done
-          
+
           # 2. Change app name to RocketChat
-          find . -path "*/strings.xml" -exec grep -l "app_name" {} \; | while read f; do
-            sed -i 's|<string name="app_name">.*</string>|<string name="app_name">RocketChat</string>|g' "$f"
-            echo "[OK] Fixed app_name in $f"
-          done
-          
-          # 3. Replace launcher icons with rocket icon
-          # Element Android uses vector-app/src/main/res/mipmap-*
-          ICON_BASE="vector-app/src/main/res"
-          
-          for dir in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
-            if [ -d "$ICON_BASE/$dir" ]; then
-              if [ -f "icons/${dir}.png" ]; then
-                cp "icons/${dir}.png" "$ICON_BASE/$dir/ic_launcher.png"
-                cp "icons/${dir}.png" "$ICON_BASE/$dir/ic_launcher_round.png"
-                echo "[OK] Replaced icons in $dir"
-              fi
+          find . -name "strings.xml" | while read f; do
+            if grep -q 'name="app_name"' "$f"; then
+              sed -i 's|<string name="app_name">.*</string>|<string name="app_name">RocketChat</string>|' "$f"
+              echo "[OK] Set app_name in $f"
             fi
           done
-          
-          # 4. Handle adaptive icon (anydpi-v26)
-          ADAPTIVE_DIR="$ICON_BASE/mipmap-anydpi-v26"
-          if [ -d "$ADAPTIVE_DIR" ]; then
-            # Replace foreground image for adaptive icon
-            if [ -f "icons/anydpi-v26.png" ]; then
-              # The foreground needs to be a specific size and have padding
-              # We'll replace the XML-based foreground with our PNG
-              cp "icons/anydpi-v26.png" "$ADAPTIVE_DIR/ic_launcher_foreground.png"
-              echo "[OK] Replaced adaptive icon foreground"
-              
-              # Update ic_launcher.xml to use PNG foreground instead of vector
-              cat > "$ADAPTIVE_DIR/ic_launcher.xml" << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@drawable/ic_launcher_background"/>
-              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-          </adaptive-icon>
-          EOF
-              
-              cat > "$ADAPTIVE_DIR/ic_launcher_round.xml" << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@drawable/ic_launcher_background"/>
-              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-          </adaptive-icon>
-          EOF
-              echo "[OK] Updated adaptive icon XML"
+
+          # 3. Replace launcher icons
+          ICON_DIR="vector-app/src/main/res"
+          for dir in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            UPPER=$(echo $dir | sed 's/.*/\u&/')
+            SRC="icons/mipmap-${dir}.png"
+            DST_DIR="$ICON_DIR/mipmap-${dir}"
+            if [ -d "$DST_DIR" ] && [ -f "$SRC" ]; then
+              cp "$SRC" "$DST_DIR/ic_launcher.png"
+              cp "$SRC" "$DST_DIR/ic_launcher_round.png"
+              echo "[OK] Replaced icons in mipmap-${dir}"
             fi
+          done
+
+          # 4. Adaptive icon (anydpi-v26)
+          ANYDPI="$ICON_DIR/mipmap-anydpi-v26"
+          if [ -d "$ANYDPI" ] && [ -f "icons/anydpi-v26.png" ]; then
+            cp "icons/anydpi-v26.png" "$ANYDPI/ic_launcher_foreground.png"
+            echo "[OK] Replaced adaptive icon foreground"
           fi
-          
-          # 5. Set launcher background color to white (for adaptive icon)
-          BG_FILE="$ICON_BASE/drawable/ic_launcher_background.xml"
-          if [ -f "$BG_FILE" ]; then
-            cat > "$BG_FILE" << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="108"
-              android:viewportHeight="108">
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M0,0h108v108h-108z"/>
-          </vector>
-          EOF
-              echo "[OK] Set background color to white"
-          fi
-          
-          echo "=== All customizations applied ==="
+
+          echo "=== Customizations applied ==="
 
       - name: Grant execute permission
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleGplayDebug --no-daemon --stacktrace
+        run: ./gradlew :vector-app:assembleGplayDebug --no-daemon --stacktrace
         env:
-          JAVA_HOME: ${{ steps.setup-java.outputs.path }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: RocketChat-debug
-          path: vector-app/build/outputs/apk/gplay/debug/vector-app-gplay-debug.apk
+          path: vector-app/build/outputs/apk/gplay/debug/*.apk
           retention-days: 30
