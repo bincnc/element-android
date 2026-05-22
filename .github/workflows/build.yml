@@ -41,52 +41,79 @@ jobs:
           echo "=== Applying RocketChat customizations ==="
           
           # 1. Set default homeserver URL to chat.picn.eu.org
-          # Find and replace in strings.xml
-          find app/src -name "strings.xml" -exec sed -i \
-            's|<string name="default_homeserver_url">.*</string>|<string name="default_homeserver_url">https://chat.picn.eu.org</string>|g' {} \;
-          echo "[OK] Default homeserver set to https://chat.picn.eu.org"
+          # Element Android stores this in vector-app module's strings.xml
+          find . -path "*/strings.xml" -exec grep -l "default_homeserver_url" {} \; | while read f; do
+            sed -i 's|<string name="default_homeserver_url">.*</string>|<string name="default_homeserver_url">https://chat.picn.eu.org</string>|g' "$f"
+            echo "[OK] Fixed homeserver in $f"
+          done
           
           # 2. Change app name to RocketChat
-          find app/src -name "strings.xml" -exec sed -i \
-            's|<string name="app_name">.*</string>|<string name="app_name">RocketChat</string>|g' {} \;
-          echo "[OK] App name changed to RocketChat"
+          find . -path "*/strings.xml" -exec grep -l "app_name" {} \; | while read f; do
+            sed -i 's|<string name="app_name">.*</string>|<string name="app_name">RocketChat</string>|g' "$f"
+            echo "[OK] Fixed app_name in $f"
+          done
           
           # 3. Replace launcher icons with rocket icon
-          for dir in app/src/main/res/mipmap-*; do
-            if [ -d "$dir" ]; then
-              basename_dir=$(basename "$dir")
-              if [ -f "icons/${basename_dir}.png" ]; then
-                cp "icons/${basename_dir}.png" "$dir/ic_launcher.png"
-                cp "icons/${basename_dir}.png" "$dir/ic_launcher_round.png"
-                echo "[OK] Replaced icons in $basename_dir"
+          # Element Android uses vector-app/src/main/res/mipmap-*
+          ICON_BASE="vector-app/src/main/res"
+          
+          for dir in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
+            if [ -d "$ICON_BASE/$dir" ]; then
+              if [ -f "icons/${dir}.png" ]; then
+                cp "icons/${dir}.png" "$ICON_BASE/$dir/ic_launcher.png"
+                cp "icons/${dir}.png" "$ICON_BASE/$dir/ic_launcher_round.png"
+                echo "[OK] Replaced icons in $dir"
               fi
             fi
           done
           
           # 4. Handle adaptive icon (anydpi-v26)
-          if [ -d "app/src/main/res/mipmap-anydpi-v26" ]; then
-            cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'ADAPTIVE_EOF'
+          ADAPTIVE_DIR="$ICON_BASE/mipmap-anydpi-v26"
+          if [ -d "$ADAPTIVE_DIR" ]; then
+            # Replace foreground image for adaptive icon
+            if [ -f "icons/anydpi-v26.png" ]; then
+              # The foreground needs to be a specific size and have padding
+              # We'll replace the XML-based foreground with our PNG
+              cp "icons/anydpi-v26.png" "$ADAPTIVE_DIR/ic_launcher_foreground.png"
+              echo "[OK] Replaced adaptive icon foreground"
+              
+              # Update ic_launcher.xml to use PNG foreground instead of vector
+              cat > "$ADAPTIVE_DIR/ic_launcher.xml" << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_launcher_background"/>
+              <background android:drawable="@drawable/ic_launcher_background"/>
               <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
           </adaptive-icon>
-          ADAPTIVE_EOF
+          EOF
               
-              # Copy foreground image
-              cp icons/anydpi-v26.png app/src/main/res/mipmap-anydpi-v26/ic_launcher_foreground.png
-              echo "[OK] Adaptive icon configured"
+              cat > "$ADAPTIVE_DIR/ic_launcher_round.xml" << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background"/>
+              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+          </adaptive-icon>
+          EOF
+              echo "[OK] Updated adaptive icon XML"
+            fi
           fi
           
-          # 5. Create background color for adaptive icon
-          mkdir -p app/src/main/res/values
-          cat > app/src/main/res/values/ic_launcher_background.xml << 'BG_EOF'
+          # 5. Set launcher background color to white (for adaptive icon)
+          BG_FILE="$ICON_BASE/drawable/ic_launcher_background.xml"
+          if [ -f "$BG_FILE" ]; then
+            cat > "$BG_FILE" << 'EOF'
           <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="ic_launcher_background">#FFFFFF</color>
-          </resources>
-          BG_EOF
-          echo "[OK] Icon background color set"
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M0,0h108v108h-108z"/>
+          </vector>
+          EOF
+              echo "[OK] Set background color to white"
+          fi
           
           echo "=== All customizations applied ==="
 
@@ -94,7 +121,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: ./gradlew assembleGplayDebug --no-daemon --stacktrace
         env:
           JAVA_HOME: ${{ steps.setup-java.outputs.path }}
 
@@ -102,11 +129,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: RocketChat-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: vector-app/build/outputs/apk/gplay/debug/vector-app-gplay-debug.apk
           retention-days: 30
-
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: app/build/outputs/apk/debug/app-debug.apk
