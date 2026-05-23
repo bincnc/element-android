@@ -2,11 +2,6 @@ name: Build RocketChat APK
 
 on:
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: 'Element Android version tag (e.g. v1.6.42)'
-        required: true
-        default: 'v1.6.42'
 
 jobs:
   build:
@@ -17,8 +12,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.release_tag }}
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -54,8 +47,8 @@ jobs:
       - name: Apply RocketChat customizations
         run: |
           echo "=== Applying RocketChat customizations ==="
-
-          # 1. Set default homeserver URL
+          
+          # 1. Set default homeserver URL to chat.picn.eu.org
           find . -name "strings.xml" | while read f; do
             if grep -q "default_homeserver_url" "$f"; then
               sed -i 's|<string name="default_homeserver_url">.*</string>|<string name="default_homeserver_url">https://chat.picn.eu.org</string>|' "$f"
@@ -74,7 +67,6 @@ jobs:
           # 3. Replace launcher icons
           ICON_DIR="vector-app/src/main/res"
           for dir in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
-            UPPER=$(echo $dir | sed 's/.*/\u&/')
             SRC="icons/mipmap-${dir}.png"
             DST_DIR="$ICON_DIR/mipmap-${dir}"
             if [ -d "$DST_DIR" ] && [ -f "$SRC" ]; then
@@ -84,7 +76,7 @@ jobs:
             fi
           done
 
-          # 4. Adaptive icon (anydpi-v26)
+          # 4. Adaptive icon
           ANYDPI="$ICON_DIR/mipmap-anydpi-v26"
           if [ -d "$ANYDPI" ] && [ -f "icons/anydpi-v26.png" ]; then
             cp "icons/anydpi-v26.png" "$ANYDPI/ic_launcher_foreground.png"
@@ -97,7 +89,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew :vector-app:assembleGplayDebug --no-daemon --stacktrace
+        run: ./gradlew :vector-app:assembleGplayDebug --no-daemon
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
