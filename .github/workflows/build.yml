@@ -13,11 +13,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup JDK 17
+      - name: Setup JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Setup Android SDK
         run: |
@@ -51,15 +51,9 @@ jobs:
 
       - name: Fix Gradle JVM options
         run: |
-          # Remove deprecated MaxPermSize option (not supported in Java 8+)
           if [ -f "gradle.properties" ]; then
             sed -i 's/-XX:MaxPermSize=[^ ]*//g' gradle.properties
             echo "[OK] Fixed gradle.properties"
-          fi
-          # Also check vector-app/gradle.properties
-          if [ -f "vector-app/gradle.properties" ]; then
-            sed -i 's/-XX:MaxPermSize=[^ ]*//g' vector-app/gradle.properties
-            echo "[OK] Fixed vector-app/gradle.properties"
           fi
 
       - name: Apply RocketChat customizations
