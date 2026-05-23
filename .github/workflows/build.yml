@@ -25,21 +25,15 @@ jobs:
           export ANDROID_SDK_ROOT=$HOME/android-sdk
           mkdir -p $ANDROID_HOME/cmdline-tools
           
-          # Download Android command line tools
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdtools.zip
           unzip -q cmdtools.zip -d $ANDROID_HOME/cmdline-tools
           mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest
           
-          # Add to PATH for THIS step
           export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           
-          # Accept licenses
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          
-          # Install required SDK components
           sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1
           
-          # Export for subsequent steps
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
           echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
@@ -54,6 +48,19 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
+
+      - name: Fix Gradle JVM options
+        run: |
+          # Remove deprecated MaxPermSize option (not supported in Java 8+)
+          if [ -f "gradle.properties" ]; then
+            sed -i 's/-XX:MaxPermSize=[^ ]*//g' gradle.properties
+            echo "[OK] Fixed gradle.properties"
+          fi
+          # Also check vector-app/gradle.properties
+          if [ -f "vector-app/gradle.properties" ]; then
+            sed -i 's/-XX:MaxPermSize=[^ ]*//g' vector-app/gradle.properties
+            echo "[OK] Fixed vector-app/gradle.properties"
+          fi
 
       - name: Apply RocketChat customizations
         run: |
